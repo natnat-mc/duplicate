@@ -1,0 +1,237 @@
+#!/usr/bin/env lua5.3
+
+-- command line detection
+if not arg[1] then
+	error("Syntax: duplicate <directory>")
+end
+
+-- utilities
+local function escape(s)
+	return '"'..s:gsub("\\", "\\\\"):gsub("\"", "\\\"")..'"'
+end
+local function ask(s, def)
+	while true do
+		io.write(s)
+		io.write '? ['
+		if def then
+			io.write 'Y/n'
+		else
+			io.write 'y/N'
+		end
+		io.write ']: '
+		io.flush()
+		
+		local val=io.read '*l':lower()
+		if val=='y' or (val=='' and def) then
+			return true
+		elseif val=='n' or (val=='' and not def) then
+			return false
+		end
+	end
+end
+local function prompt(s, def)
+	io.write(s)
+	io.write '?: '
+	io.flush()
+	
+	local val=io.read '*l'
+	if val=='' then
+		return def or ''
+	else
+		return val
+	end
+end
+local ansi={
+	clearline=string.char(27)..'[2K'..string.char(27)..'[1G'
+}
+
+-- checksum program detection
+local sumcommand
+if os.execute('which xxhsum > /dev/null') then
+	sumcommand='xxhsum'
+elseif os.execute('which xxh32sum > /dev/null') then
+	sumcommand='xxh32sum'
+elseif os.execute('which md5sum > /dev/null') then
+	sumcommand='md5sum'
+else
+	error("No sum command available")
+end
+
+-- file listing
+local filelist, filecount={}, 0
+do
+	io.write "Listing files...\n"
+	io.flush()
+	
+	local fd=io.popen('find '..escape(arg[1])..' -type f', 'r')
+	for line in fd:lines() do
+		filecount=filecount+1
+		filelist[filecount]=line
+	end
+	fd:close()
+	
+	io.write 'Done.\n'
+	io.flush()
+end
+
+-- basic checksum-based detection
+local duplicatesums, duplicatesumcount, duplicatesumimagecount={}, 0, 0
+do
+	io.write "Checksuming files...\n"
+	io.write '0/'
+	io.write(filecount)
+	io.write ' (0%) - 0 potential duplicate groups'
+	io.flush()
+	
+	local sums={}
+	for i, file in ipairs(filelist) do
+		local fd=io.popen(sumcommand..' '..escape(file)..' 2> /dev/null', 'r')
+		local sum=fd:read '*l':match "^([a-fA-F0-9]+)"
+		fd:close()
+		if sums[sum] then
+			if not duplicatesums[sum] then
+				duplicatesums[sum]={sums[sum]}
+				duplicatesumcount=duplicatesumcount+1
+				duplicatesumimagecount=duplicatesumimagecount+1
+			end
+			table.insert(duplicatesums[sum], file)
+			duplicatesumimagecount=duplicatesumimagecount+1
+		end
+		sums[sum]=file
+		
+		io.write(ansi.clearline)
+		io.write(i)
+		io.write '/'
+		io.write(filecount)
+		io.write ' ('
+		io.write(math.floor(i/filecount*100))
+		io.write '%) - '
+		io.write(duplicatesumcount)
+		io.write ' potential duplicate groups'
+		io.flush()
+	end
+	io.write '\nDone.\n'
+	io.flush()
+end
+
+-- byte-by-byte detection
+local duplicatefiles, duplicatefilecount={}, 0
+if duplicatesumcount~=0 then
+	io.write "Detecting duplicates...\n"
+	io.write '0/0 0/'
+	io.write(duplicatesumcount)
+	io.write ' 0/'
+	io.write(duplicatesumimagecount)
+	io.write ' (0%) - 0 duplicate groups'
+	io.flush()
+	
+	local imageno, groupno=0, 0
+	for sum, filelist in pairs(duplicatesums) do
+		groupno=groupno+1
+		io.write(ansi.clearline)
+		io.write '0/'
+		io.write(#filelist)
+		io.write ' '
+		io.write(groupno)
+		io.write '/'
+		io.write(duplicatesumcount)
+		io.write ' '
+		io.write(imageno)
+		io.write '/'
+		io.write(duplicatesumimagecount)
+		io.write ' ('
+		io.write(math.floor(imageno/duplicatesumimagecount*100))
+		io.write '%) - '
+		io.write(duplicatefilecount)
+		io.write ' duplicate groups'
+		io.flush()
+		
+		local contents={}
+		for i, file in ipairs(filelist) do
+			imageno=imageno+1
+			
+			local fd, err=io.open(file, 'rb')
+			local content, err2=fd:read '*a'
+			if not content then
+				print()
+				print(file, err, err2)
+			end
+			fd:close()
+			if contents[content] then
+				if not duplicatefiles[content] then
+					duplicatefiles[content]={contents[content]}
+					duplicatefilecount=duplicatefilecount+1
+				end
+				table.insert(duplicatefiles[content], file)
+			end
+			contents[content]=file
+			
+			io.write(ansi.clearline)
+			io.write(i)
+			io.write '/'
+			io.write(#filelist)
+			io.write ' '
+			io.write(groupno)
+			io.write '/'
+			io.write(duplicatesumcount)
+			io.write ' '
+			io.write(imageno)
+			io.write '/'
+			io.write(duplicatesumimagecount)
+			io.write ' ('
+			io.write(math.floor(imageno/duplicatesumimagecount*100))
+			io.write '%) - '
+			io.write(duplicatefilecount)
+			io.write ' duplicate groups'
+			io.flush()
+		end
+	end
+	io.write '\nDone.\n'
+	io.flush()
+end
+
+-- result generation
+do
+	if duplicatefilecount==0 then
+		io.write "No duplicates found\n"
+		return 0
+	end
+	
+	io.write(duplicatefilecount)
+	io.write " duplicate groups found\n"
+	
+	if ask("Generate report file", true) then
+		local filename=prompt("Report file name", 'reportfile')
+		local fd=io.open(filename, 'w')
+		
+		local groupno=0
+		for _, files in pairs(duplicatefiles) do
+			groupno=groupno+1
+			fd:write '[group'
+			fd:write(groupno)
+			fd:write ']\n'
+			
+			for __, file in ipairs(files) do
+				fd:write '\t'
+				fd:write(file)
+				fd:write '\n'
+			end
+		end
+		fd:close()
+	end
+	
+	if ask("Generate remove script", true) then
+		local filename=prompt("Remove file name", 'remove.sh')
+		local fd=io.open(filename, 'w')
+		fd:write "#!/bin/sh\n"
+		for _, files in pairs(duplicatefiles) do
+			for i=2, #files do
+				fd:write 'rm '
+				fd:write(escape(files[i]))
+				fd:write '\n'
+			end
+		end
+		fd:close()
+		os.execute("chmod +x "..escape(filename))
+	end
+end
