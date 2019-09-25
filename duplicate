@@ -61,6 +61,7 @@ end
 local filelist, filecount={}, 0
 do
 	io.write "Listing files...\n"
+	local starttime=os.time()
 	io.flush()
 	
 	local fd=io.popen('find '..escape(arg[1])..' -type f', 'r')
@@ -70,7 +71,9 @@ do
 	end
 	fd:close()
 	
-	io.write 'Done.\n'
+	io.write 'Done ('
+	io.write(os.time()-starttime)
+	io.write 's).\n'
 	io.flush()
 end
 
@@ -78,6 +81,7 @@ end
 local duplicatesums, duplicatesumcount, duplicatesumimagecount={}, 0, 0
 do
 	io.write "Checksuming files...\n"
+	local starttime=os.time()
 	io.write '0/'
 	io.write(filecount)
 	io.write ' (0%) - 0 potential duplicate groups'
@@ -110,7 +114,9 @@ do
 		io.write ' potential duplicate groups'
 		io.flush()
 	end
-	io.write '\nDone.\n'
+	io.write '\nDone ('
+	io.write(os.time()-starttime)
+	io.write 's).\n'
 	io.flush()
 end
 
@@ -118,6 +124,7 @@ end
 local duplicatefiles, duplicatefilecount={}, 0
 if duplicatesumcount~=0 then
 	io.write "Detecting duplicates...\n"
+	local starttime=os.time()
 	io.write '0/0 0/'
 	io.write(duplicatesumcount)
 	io.write ' 0/'
@@ -146,47 +153,67 @@ if duplicatesumcount~=0 then
 		io.write ' duplicate groups'
 		io.flush()
 		
-		local contents={}
+		local sizegroups={}
 		for i, file in ipairs(filelist) do
-			imageno=imageno+1
-			
-			local fd, err=io.open(file, 'rb')
-			local content, err2=fd:read '*a'
-			if not content then
-				print()
-				print(file, err, err2)
-			end
+			local fd=io.popen('du -b '..escape(file), 'r')
+			local size=tonumber(fd:read '*l':match "^(%d+)")
 			fd:close()
-			if contents[content] then
-				if not duplicatefiles[content] then
-					duplicatefiles[content]={contents[content]}
-					duplicatefilecount=duplicatefilecount+1
-				end
-				table.insert(duplicatefiles[content], file)
+
+			if not sizegroups[size] then
+				sizegroups[size]={}
 			end
-			contents[content]=file
-			
-			io.write(ansi.clearline)
-			io.write(i)
-			io.write '/'
-			io.write(#filelist)
-			io.write ' '
-			io.write(groupno)
-			io.write '/'
-			io.write(duplicatesumcount)
-			io.write ' '
-			io.write(imageno)
-			io.write '/'
-			io.write(duplicatesumimagecount)
-			io.write ' ('
-			io.write(math.floor(imageno/duplicatesumimagecount*100))
-			io.write '%) - '
-			io.write(duplicatefilecount)
-			io.write ' duplicate groups'
-			io.flush()
+			table.insert(sizegroups[size], file)
+		end
+		
+		for size, files in pairs(sizegroups) do
+			if #files==1 then
+				imageno=imageno+1
+				break
+			end
+			local contents={}
+			for i, file in ipairs(files) do
+				imageno=imageno+1
+				
+				local fd, err=io.open(file, 'rb')
+				local content, err2=fd:read '*a'
+				if not content then
+					print()
+					print(file, err, err2)
+				end
+				fd:close()
+				if contents[content] then
+					if not duplicatefiles[content] then
+						duplicatefiles[content]={contents[content]}
+						duplicatefilecount=duplicatefilecount+1
+					end
+					table.insert(duplicatefiles[content], file)
+				end
+				contents[content]=file
+				
+				io.write(ansi.clearline)
+				io.write(i)
+				io.write '/'
+				io.write(#filelist)
+				io.write ' '
+				io.write(groupno)
+				io.write '/'
+				io.write(duplicatesumcount)
+				io.write ' '
+				io.write(imageno)
+				io.write '/'
+				io.write(duplicatesumimagecount)
+				io.write ' ('
+				io.write(math.floor(imageno/duplicatesumimagecount*100))
+				io.write '%) - '
+				io.write(duplicatefilecount)
+				io.write ' duplicate groups'
+				io.flush()
+			end
 		end
 	end
-	io.write '\nDone.\n'
+	io.write '\nDone ('
+	io.write(os.time()-starttime)
+	io.write 's).\n'
 	io.flush()
 end
 
