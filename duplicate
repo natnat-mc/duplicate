@@ -155,10 +155,10 @@ if duplicatesumcount~=0 then
 		
 		local sizegroups={}
 		for i, file in ipairs(filelist) do
-			local fd=io.popen('du -b '..escape(file), 'r')
+			local fd=io.popen('du '..escape(file), 'r')
 			local size=tonumber(fd:read '*l':match "^(%d+)")
 			fd:close()
-
+			
 			if not sizegroups[size] then
 				sizegroups[size]={}
 			end
